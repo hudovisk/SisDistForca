@@ -2,6 +2,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
+import java.security.KeyPair;
 import java.security.PublicKey;
 
 /**
@@ -14,6 +15,7 @@ public class Game implements ISocketActions {
     private SocketListenner socket;
 
     public static Player g_currentPlayer;
+    private KeyPair playerKeyPair;
 
     private BufferedReader m_br = new BufferedReader(new InputStreamReader(System.in));
 
@@ -62,14 +64,9 @@ public class Game implements ISocketActions {
     public void run() throws IOException {
         System.out.print("Enter nickname: ");
         String nickname = m_br.readLine();
-//        String nickname = "hudovisk";
-        System.out.print("Enter passphrase: ");
-        String passphrase = m_br.readLine();
-//        String passphrase = "123";
 
         //Initializing keys
-        RSAEncryptDecrypt myRSA = new RSAEncryptDecrypt(nickname);
-        myRSA.createKeys();
+        playerKeyPair = RSAEncryptDecrypt.createKeys();
 
         //NOTE: FOR THIS TO WORK IN MAC OS X PLEASE USE -Djava.net.preferIPv4Stack=true.
         //SOURCE: https://github.com/bluestreak01/questdb/issues/23
@@ -78,7 +75,7 @@ public class Game implements ISocketActions {
         new Thread(socket).start();
 
         g_currentPlayer = new Player(nickname);
-        g_currentPlayer.setPublicKey(myRSA.getPublicKey());
+        g_currentPlayer.setPublicKey(playerKeyPair.getPublic());
 
         GamePacket connectionPacket = new GamePacket();
         connectionPacket.setPlayer(g_currentPlayer);
@@ -103,7 +100,7 @@ public class Game implements ISocketActions {
         encriptedName.setPlayer(g_currentPlayer);
         encriptedName.setAction(GamePacket.Actions.WORD_GUESS);
         encriptedName.setCurrentWord(g_currentPlayer.getNickname());
-        encriptedName.setEncryptedSign(myRSA.encrypt(g_currentPlayer.getNickname(), myRSA.getPrivateKey()));
+        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
         while(true)
         {
             try

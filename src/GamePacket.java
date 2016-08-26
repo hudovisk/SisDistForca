@@ -17,6 +17,8 @@ public class GamePacket implements Serializable {
     private Actions m_action;
     private Character m_letterGuessed;
     private String m_currentWord;
+    private int m_nonce;
+    private byte[] m_encryptedSign;
 
     public byte[] getEncryptedSign() {
         return m_encryptedSign;
@@ -25,8 +27,6 @@ public class GamePacket implements Serializable {
     public void setEncryptedSign(byte[] encryptedSign) {
         this.m_encryptedSign = encryptedSign;
     }
-
-    private byte[] m_encryptedSign;
 
     public Character getLetterGuessed() {
         return m_letterGuessed;

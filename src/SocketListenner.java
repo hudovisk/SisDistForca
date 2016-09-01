@@ -60,9 +60,17 @@ public class SocketListenner implements Runnable{
 
         try {
             GamePacket gamePacket = (GamePacket) ois.readObject();
+            Player player = gamePacket.getPlayer();
             if(m_socketActionsListenner != null &&
-                    !gamePacket.getPlayer().getNickname().equals(Game.g_currentPlayer.getNickname())) {
-                m_socketActionsListenner.gamePacketReceived(gamePacket);
+                    !player.getNickname().equals(Game.g_currentPlayer.getNickname())) {
+                String signature = RSAEncryptDecrypt.decrypt(gamePacket.getEncryptedSign(),
+                        player.getPublicKey());
+                if(signature.equals(player.getNickname())) {
+                    m_socketActionsListenner.gamePacketReceived(gamePacket);
+                } else {
+                    System.out.println("Invalid signature received from: " + player.getNickname() +
+                            ". Signature: " + signature);
+                }
             }
         } catch (ClassNotFoundException e) {
             e.printStackTrace();

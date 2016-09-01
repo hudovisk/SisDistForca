@@ -4,10 +4,11 @@ import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.security.KeyPair;
 import java.security.PublicKey;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.TreeSet;
+import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Created by Hudo on 21/08/2016.
- */
 public class Game implements ISocketActions {
 
     public static final String GROUP_ADDR = "228.5.6.7";
@@ -17,13 +18,12 @@ public class Game implements ISocketActions {
     public static Player g_currentPlayer;
     private KeyPair playerKeyPair;
 
+    private boolean m_gameReady = false;
+
     private BufferedReader m_br = new BufferedReader(new InputStreamReader(System.in));
 
-    /*TEMPORARY TEST VARIABLES FOR RSA TEST */
-    PublicKey otherPlayerPubK;
-    Boolean otherPlayerReceivedConnect = false;
-    Boolean sentOK = false;
-    /*TEMPORARY TEST VARIABLES FOR RSA TEST */
+    private TreeSet<Player> m_connectedPlayers = new TreeSet<>((o1, o2) -> o1.getRndOrder() - o2.getRndOrder());
+    private int m_wordGeneratorPlayerIndex = 0;
 
     @Override
     public void gamePacketReceived(GamePacket packet) {
@@ -32,30 +32,19 @@ public class Game implements ISocketActions {
         switch (packet.getAction())
         {
             case CONNECTED:
-                System.out.println("Player received connect: " + player.getNickname());
-                otherPlayerPubK = player.getPublicKey();
-                if(!sentOK)
+                if(player.getRndOrder() == g_currentPlayer.getRndOrder())
                 {
-                    //sendOK
-                    GamePacket connectionPacket = new GamePacket();
-                    connectionPacket.setPlayer(g_currentPlayer);
-                    connectionPacket.setAction(GamePacket.Actions.CONNECT_OK);
-                    try
-                    {
-                        socket.sendGamePacket(connectionPacket);
-                    }
-                    catch (Exception e)
-                    {
-                        e.printStackTrace();
+                    //Conflict - Update rnd order and send connect again
+                    g_currentPlayer.setRndOrder(ThreadLocalRandom.current().nextInt());
+                } else {
+                    // Does not add if the player already exist!
+                    if(!m_connectedPlayers.add(player)) {
+                        System.out.println("Player already connected: " + player.getNickname());
                     }
                 }
                 break;
-            case CONNECT_OK:
-                System.out.println("Player received confirmation " + player.getNickname());
-                otherPlayerReceivedConnect = true;
-                break;
             case WORD_GUESS:
-                System.out.println("The message is " + packet.getCurrentWord() + " and the decrypted message is " + RSAEncryptDecrypt.decrypt(packet.getEncryptedSign(), otherPlayerPubK));
+                System.out.println("The message is " + packet.getCurrentWord() + " and the decrypted message is " + RSAEncryptDecrypt.decrypt(packet.getEncryptedSign(), player.getPublicKey()));
                 break;
         }
 
@@ -68,48 +57,64 @@ public class Game implements ISocketActions {
         //Initializing keys
         playerKeyPair = RSAEncryptDecrypt.createKeys();
 
+        //Generate random number that defines the order in the connected list.
+        int rnd = ThreadLocalRandom.current().nextInt();
+
+        g_currentPlayer = new Player(nickname, rnd);
+        g_currentPlayer.setPublicKey(playerKeyPair.getPublic());
+
         //NOTE: FOR THIS TO WORK IN MAC OS X PLEASE USE -Djava.net.preferIPv4Stack=true.
         //SOURCE: https://github.com/bluestreak01/questdb/issues/23
         socket = new SocketListenner(PORT, InetAddress.getByName(GROUP_ADDR));
         socket.setSocketActionsListenner(this);
         new Thread(socket).start();
 
-        g_currentPlayer = new Player(nickname);
-        g_currentPlayer.setPublicKey(playerKeyPair.getPublic());
-
-        GamePacket connectionPacket = new GamePacket();
-        connectionPacket.setPlayer(g_currentPlayer);
-        connectionPacket.setAction(GamePacket.Actions.CONNECTED);
-
-        try {
-            while(!otherPlayerReceivedConnect && !sentOK)
-            {
-                Thread.sleep(1000);
-                if(!otherPlayerReceivedConnect)
-                {
-                    socket.sendGamePacket(connectionPacket);
-                }
-
-            }
-        }  catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        //SEND A ENCRYPTED MESSAGE WITH ITS OWN NAME
         GamePacket encriptedName = new GamePacket();
-        encriptedName.setPlayer(g_currentPlayer);
-        encriptedName.setAction(GamePacket.Actions.WORD_GUESS);
-        encriptedName.setCurrentWord(g_currentPlayer.getNickname());
-        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
+        //SEND A ENCRYPTED MESSAGE WITH ITS OWN NAME
         while(true)
         {
             try
             {
-                Thread.sleep(1000);
-                socket.sendGamePacket(encriptedName);
+                Thread.sleep(5000);
+                System.out.println("Connected players: " + m_connectedPlayers.size());
+                if(!m_gameReady) {
+                    if(m_connectedPlayers.size() < 2) {
+                        encriptedName.setPlayer(g_currentPlayer);
+                        encriptedName.setAction(GamePacket.Actions.CONNECTED);
+                        encriptedName.setCurrentWord(g_currentPlayer.getNickname());
+                        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
+                        socket.sendGamePacket(encriptedName);
+                    }else {
+                        m_gameReady = true;
+
+                        m_connectedPlayers.add(g_currentPlayer);
+
+                        // Send the last connect packet
+                        encriptedName.setPlayer(g_currentPlayer);
+                        encriptedName.setAction(GamePacket.Actions.CONNECTED);
+                        encriptedName.setCurrentWord(g_currentPlayer.getNickname());
+                        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
+                        socket.sendGamePacket(encriptedName);
+                    }
+                } else {
+                    System.out.println("Game is ready. Player list:");
+                    printConnectedPlayersList();
+                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
+        }
+    }
+
+    private void printConnectedPlayersList() {
+        int index = 0;
+        for(Player p : m_connectedPlayers) {
+            if(index == m_wordGeneratorPlayerIndex) {
+                System.out.println(">" + p.getNickname() + " " + p.getRndOrder());
+            } else {
+                System.out.println(p.getNickname() + " " + p.getRndOrder());
+            }
+            index++;
         }
     }
 

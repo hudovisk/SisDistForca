@@ -50,6 +50,8 @@ public class SocketListenner implements Runnable{
 
         byte[] objData = baos.toByteArray();
 
+        System.out.println("objData.length = " + objData.length);
+
         DatagramPacket packet = new DatagramPacket(objData, objData.length, m_group, m_port);
         m_socket.send(packet);
     }

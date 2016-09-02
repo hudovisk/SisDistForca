@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.Comparator;
 
 public class Game implements ISocketActions {
 
@@ -23,7 +24,14 @@ public class Game implements ISocketActions {
 
     private BufferedReader m_br = new BufferedReader(new InputStreamReader(System.in));
 
-    private TreeSet<Player> m_connectedPlayers = new TreeSet<>((o1, o2) -> o1.getRndOrder() - o2.getRndOrder());
+    private TreeSet<Player> m_connectedPlayers = new TreeSet<>(new Comparator<Player>() {
+        public int compare(Player o1, Player o2) {
+            return o1.getRndOrder() - o2.getRndOrder();
+        }
+    });
+
+    private String m_lettersGuessed;
+
     private int m_wordGeneratorPlayerIndex = 0;
     private Player m_lastPlay = null;
     private String wordToGuess = null;
@@ -31,6 +39,40 @@ public class Game implements ISocketActions {
     private boolean m_anotherTurn = false;
     private boolean myTurn = false;
     private boolean m_isLetterGuessPhase = true;
+
+    private int[] generateScoreList()
+    {
+        int[] scores = new int[m_connectedPlayers.size()];
+        int i = 0;
+        for (Player p : m_connectedPlayers)
+        {
+            scores[i++] = p.getScore();
+        }
+        return scores;
+    }   
+
+    private int[] generateCurrentErrorsList()
+    {
+        int[] errors = new int[m_connectedPlayers.size()];
+        int i = 0;
+        for (Player p : m_connectedPlayers)
+        {
+            errors[i++] = p.getErrorsThisTurn();
+        }
+        return errors;
+    }
+
+    private Player findPlayer(Player player)
+    {
+        for (Player p : m_connectedPlayers)
+        {
+            if (p.getNickname().equals(player.getNickname()))
+            {
+                return p;
+            }
+        }
+        return null;
+    }
 
     @Override
     public void gamePacketReceived(GamePacket packet) {
@@ -56,7 +98,9 @@ public class Game implements ISocketActions {
                 {
                     m_isLetterGuessPhase = false;
                     if (packet.getPlayer().getNickname().equals(higher(m_lastPlay).getNickname())) {
+                        m_lettersGuessed += packet.getCurrentWord().substring(0,1);
                         if (wordToGuess.contains(packet.getCurrentWord().substring(0, 1))) {
+                            //Acertô Mizeravi!
                             System.out.println(packet.getPlayer().getNickname() + " got " + packet.getCurrentWord() + " right. ");
                             for (int i = 0; i < wordToGuess.length(); i++) {
                                 if (wordToGuess.charAt(i) == packet.getCurrentWord().charAt(0)) {
@@ -65,6 +109,7 @@ public class Game implements ISocketActions {
                             }
                             System.out.println("wordToGuess = " + wordToGuess + " and partlyGuessed = " + partlyGuessedWord);
                         } else {
+                            findPlayer(packet.getPlayer()).incrementErrorsThisTurn();
                             System.out.println(packet.getPlayer().getNickname() + " got " + packet.getCurrentWord() + " wrong.");
                         }
 
@@ -73,6 +118,10 @@ public class Game implements ISocketActions {
                         updatedWord.setAction(GamePacket.Actions.UPDATE_WORD);
                         updatedWord.setCurrentWord(partlyGuessedWord);
                         updatedWord.setEncryptedSign(RSAEncryptDecrypt.encrypt(partlyGuessedWord, playerKeyPair.getPrivate()));
+                        updatedWord.setCurrentScore(generateScoreList());
+                        updatedWord.setCurrentErrors(generateCurrentErrorsList());
+                        updatedWord.setCurrentGuessedLetters(m_lettersGuessed);
+
                         try {
                             socket.sendGamePacket(updatedWord);
                         } catch (Exception e) {
@@ -86,6 +135,7 @@ public class Game implements ISocketActions {
                     if (packet.getPlayer().getNickname().equals(higher(m_lastPlay).getNickname())) {
                         m_isLetterGuessPhase = true;
                         if (packet.getCurrentWord().equals(wordToGuess)) {
+                            findPlayer(packet.getPlayer()).incrementScore();
                             System.out.println("Player " + packet.getPlayer().getNickname() + " won the game by getting the word " + wordToGuess + " correctly.");
                             passTheGameToTheNextGameMaster();
                         } else {
@@ -98,11 +148,13 @@ public class Game implements ISocketActions {
 
             //ACTIONS PARSED BY PLAYERS
             case UPDATE_WORD:
-                if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
+                if(!packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
                 {
-                    System.out.println("The updated word is " + packet.getCurrentWord());
+                    return;
                 }
-                if(myTurn && packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
+                System.out.println("The updated word is " + packet.getCurrentWord());
+                System.out.println("Scores: " + packet.getCurrentScores()[0] + " " + packet.getCurrentScores()[1] + " " + packet.getCurrentScores()[2]);
+                if(myTurn)
                 {
                     System.out.print("Guess the word: ");
                     try

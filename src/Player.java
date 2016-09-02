@@ -8,6 +8,35 @@ public class Player implements Serializable {
     private String nickname;
     private int rndOrder;
     private PublicKey publicKey;
+    private int score;
+    private int errorsThisTurn;
+
+    public int getScore()
+    {
+        return score;
+    }
+
+    public void setScore(int score)
+    {
+        this.score = score;
+    }
+
+    public void incrementScore()
+    {
+        score++;
+    }
+
+    public int getErrorsThisTurn()
+    {
+        return errorsThisTurn;
+    }
+
+    public void setErrorsThisTurn(int errorsThisTurn)
+    {
+        this.errorsThisTurn = errorsThisTurn;
+    }
+
+    public void incrementErrorsThisTurn() { errorsThisTurn++; }
 
     public Player(String nickname, int rndOrder) {
         this.nickname = nickname;

@@ -17,8 +17,19 @@ public class GamePacket implements Serializable {
     private Player m_player;
     private Actions m_action;
     private String m_currentWord;
-    private int m_nonce;
+    private String m_currentGuessedLetters;
+    private int[] m_currentScores;
+    private int[] m_currentErrors;
     private byte[] m_encryptedSign;
+
+    public int[] getCurrentScores() { return m_currentScores; }
+    public void setCurrentScore(int[] score) { m_currentScores = score; }
+
+    public int[] getCurrentErrors() { return m_currentErrors; }
+    public void setCurrentErrors(int[] errors) { m_currentErrors = errors; }
+
+    public String getCurrentGuessedLetters() { return m_currentGuessedLetters; }
+    public void setCurrentGuessedLetters(String letters) { m_currentGuessedLetters = letters; }
 
     public byte[] getEncryptedSign() {
         return m_encryptedSign;

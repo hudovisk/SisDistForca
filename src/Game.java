@@ -65,7 +65,7 @@ public class Game implements ISocketActions {
                             }
                             System.out.println("wordToGuess = " + wordToGuess + " and partlyGuessed = " + partlyGuessedWord);
                         } else {
-                            System.out.print(packet.getPlayer().getNickname() + "got " + packet.getCurrentWord() + " wrong.");
+                            System.out.println(packet.getPlayer().getNickname() + " got " + packet.getCurrentWord() + " wrong.");
                         }
 
                         GamePacket updatedWord = new GamePacket();
@@ -87,7 +87,7 @@ public class Game implements ISocketActions {
                         m_isLetterGuessPhase = true;
                         if (packet.getCurrentWord().equals(wordToGuess)) {
                             System.out.println("Player " + packet.getPlayer().getNickname() + " won the game by getting the word " + wordToGuess + " correctly.");
-                            //TODO: CHANGE THE GAME MASTER NOW!
+                            passTheGameToTheNextGameMaster();
                         } else {
                             System.out.println("Too bad, wrong guess.");
                             m_anotherTurn = true;
@@ -95,8 +95,13 @@ public class Game implements ISocketActions {
                     }
                 }
                 break;
+
             //ACTIONS PARSED BY PLAYERS
             case UPDATE_WORD:
+                if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
+                {
+                    System.out.println("The updated word is " + packet.getCurrentWord());
+                }
                 if(myTurn && packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
                 {
                     System.out.print("Guess the word: ");
@@ -119,7 +124,6 @@ public class Game implements ISocketActions {
                     myTurn = false;
                 }
                 break;
-
             case NEXT_TURN:
                 if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
                 {
@@ -142,6 +146,21 @@ public class Game implements ISocketActions {
                             socket.sendGamePacket(guessLetter);
                         } catch (Exception e) {
                             e.printStackTrace();
+                        }
+                    }
+                }
+                break;
+            case NEXT_GM:
+                if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname())) {
+                    if (packet.getCurrentWord().equals(g_currentPlayer.getNickname())) {
+                        g_currentGameMaster = g_currentPlayer;
+                        initializeTurnAsGM();
+                    } else {
+                        for (Player p : m_connectedPlayers) {
+                            if (p.getNickname().equals(packet.getCurrentWord())) {
+                                g_currentGameMaster = p;
+                                break;
+                            }
                         }
                     }
                 }
@@ -209,20 +228,7 @@ public class Game implements ISocketActions {
                         System.out.println("Game Master Chosen: " + g_currentGameMaster.getNickname());
 
                         if(g_currentGameMaster == g_currentPlayer) {
-                            generate_word();
-
-                            //Configure the last player that played correctly
-                            m_lastPlay = g_currentPlayer;
-                            //Choose the next player to play
-                            String nextToPlay = higher(m_lastPlay).getNickname();
-                            System.out.println("Letting " + nextToPlay + " know that he is the next to play.");
-                            //Send packet to notify player that he should play
-                            GamePacket notifyTurn = new GamePacket();
-                            notifyTurn.setPlayer(g_currentPlayer);
-                            notifyTurn.setAction(GamePacket.Actions.NEXT_TURN);
-                            notifyTurn.setCurrentWord(nextToPlay);
-                            notifyTurn.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToPlay, playerKeyPair.getPrivate()));
-                            socket.sendGamePacket(notifyTurn);
+                            initializeTurnAsGM();
                         }
                     }
                     else
@@ -257,6 +263,33 @@ public class Game implements ISocketActions {
         }
     }
 
+    private void initializeTurnAsGM()
+    {
+        generate_word();
+        m_anotherTurn = false;
+        m_isLetterGuessPhase = true;
+
+        //Configure the last player that played correctly
+        m_lastPlay = g_currentPlayer;
+        //Choose the next player to play
+        String nextToPlay = higher(m_lastPlay).getNickname();
+        System.out.println("Letting " + nextToPlay + " know that he is the next to play.");
+        //Send packet to notify player that he should play
+        GamePacket notifyTurn = new GamePacket();
+        notifyTurn.setPlayer(g_currentPlayer);
+        notifyTurn.setAction(GamePacket.Actions.NEXT_TURN);
+        notifyTurn.setCurrentWord(nextToPlay);
+        notifyTurn.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToPlay, playerKeyPair.getPrivate()));
+        try
+        {
+            socket.sendGamePacket(notifyTurn);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
     private Player higher(Player current)
     {
         Player next = m_connectedPlayers.higher(current);
@@ -278,9 +311,31 @@ public class Game implements ISocketActions {
         }
     }
 
+    private void passTheGameToTheNextGameMaster()
+    {
+        g_currentGameMaster = higher(g_currentGameMaster);
+
+        String nextToBeGameMaster = g_currentGameMaster.getNickname();
+        //Send packet to notify player that he should be the next game master
+        GamePacket notifyTurnGM = new GamePacket();
+        notifyTurnGM.setPlayer(g_currentPlayer);
+        notifyTurnGM.setAction(GamePacket.Actions.NEXT_GM);
+        notifyTurnGM.setCurrentWord(nextToBeGameMaster);
+        notifyTurnGM.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToBeGameMaster, playerKeyPair.getPrivate()));
+        try
+        {
+            socket.sendGamePacket(notifyTurnGM);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
     private void generate_word()
     {
-        System.out.print("Type the word: ");
+        partlyGuessedWord = "";
+        System.out.print("You're the new game master. Type the word for the new game: ");
         try {
             wordToGuess = m_br.readLine();
         } catch (Exception e)

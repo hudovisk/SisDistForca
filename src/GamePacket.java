@@ -8,7 +8,7 @@ public class GamePacket implements Serializable {
     public enum Actions {
         CONNECTED,
         NEXT_TURN,
-        CONNECT_OK,
+        NEXT_GM,
         LETTER_GUESS,
         UPDATE_WORD,
         WORD_GUESS

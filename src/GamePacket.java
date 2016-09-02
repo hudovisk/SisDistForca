@@ -7,6 +7,7 @@ public class GamePacket implements Serializable {
 
     public enum Actions {
         CONNECTED,
+        NEXT_TURN,
         CONNECT_OK,
         LETTER_GUESS,
         UPDATE_WORD,
@@ -15,7 +16,6 @@ public class GamePacket implements Serializable {
 
     private Player m_player;
     private Actions m_action;
-    private Character m_letterGuessed;
     private String m_currentWord;
     private int m_nonce;
     private byte[] m_encryptedSign;
@@ -26,14 +26,6 @@ public class GamePacket implements Serializable {
 
     public void setEncryptedSign(byte[] encryptedSign) {
         this.m_encryptedSign = encryptedSign;
-    }
-
-    public Character getLetterGuessed() {
-        return m_letterGuessed;
-    }
-
-    public void setLetterGuessed(Character letterGuessed) {
-        this.m_letterGuessed = letterGuessed;
     }
 
     public String getCurrentWord() {

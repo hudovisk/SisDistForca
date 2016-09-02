@@ -65,7 +65,7 @@ public class SocketListenner implements Runnable{
                     !player.getNickname().equals(Game.g_currentPlayer.getNickname())) {
                 String signature = RSAEncryptDecrypt.decrypt(gamePacket.getEncryptedSign(),
                         player.getPublicKey());
-                if(signature.equals(player.getNickname())) {
+                if(signature.equals(gamePacket.getCurrentWord())) {
                     m_socketActionsListenner.gamePacketReceived(gamePacket);
                 } else {
                     System.out.println("Invalid signature received from: " + player.getNickname() +

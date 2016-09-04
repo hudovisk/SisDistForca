@@ -1,4 +1,5 @@
 import java.io.Serializable;
+import java.security.PrivateKey;
 
 /**
  * Created by Hudo on 21/08/2016.
@@ -11,25 +12,27 @@ public class GamePacket implements Serializable {
         NEXT_GM,
         LETTER_GUESS,
         UPDATE_WORD,
-        WORD_GUESS
+        UPDATE_SCORE, WORD_GUESS
     };
 
     private Player m_player;
     private Actions m_action;
-    private String m_currentWord;
-    private String m_currentGuessedLetters;
-    private int[] m_currentScores;
-    private int[] m_currentErrors;
     private byte[] m_encryptedSign;
 
-    public int[] getCurrentScores() { return m_currentScores; }
-    public void setCurrentScore(int[] score) { m_currentScores = score; }
+    private GamePayload m_payload;
 
-    public int[] getCurrentErrors() { return m_currentErrors; }
-    public void setCurrentErrors(int[] errors) { m_currentErrors = errors; }
 
-    public String getCurrentGuessedLetters() { return m_currentGuessedLetters; }
-    public void setCurrentGuessedLetters(String letters) { m_currentGuessedLetters = letters; }
+    public void sign(PrivateKey key) {
+        m_encryptedSign = RSAEncryptDecrypt.encrypt(m_player.getNickname(), key);
+    }
+
+    public GamePayload getPayload() {
+        return m_payload;
+    }
+
+    public void setPayload(GamePayload payload) {
+        m_payload = payload;
+    }
 
     public byte[] getEncryptedSign() {
         return m_encryptedSign;
@@ -38,15 +41,6 @@ public class GamePacket implements Serializable {
     public void setEncryptedSign(byte[] encryptedSign) {
         this.m_encryptedSign = encryptedSign;
     }
-
-    public String getCurrentWord() {
-        return m_currentWord;
-    }
-
-    public void setCurrentWord(String currentWord) {
-        this.m_currentWord = currentWord;
-    }
-
 
     public Player getPlayer() {
         return m_player;

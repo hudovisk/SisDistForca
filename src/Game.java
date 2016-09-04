@@ -3,10 +3,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.security.KeyPair;
-import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.TreeSet;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.Comparator;
 
@@ -14,31 +12,29 @@ public class Game implements ISocketActions {
 
     public static final String GROUP_ADDR = "228.5.6.7";
     public static final int PORT = 6789;
-    private SocketListenner socket;
-
     public static Player g_currentPlayer;
-    public static Player g_currentGameMaster = null;
-    private KeyPair playerKeyPair;
+
+    private int m_guessingPlayerIndex = 0;
+    private int m_gameMasterIndex = 0;
+
+    private SocketListenner m_socket;
+
+    private KeyPair m_playerKeyPair;
 
     private boolean m_gameReady = false;
 
     private BufferedReader m_br = new BufferedReader(new InputStreamReader(System.in));
 
-    private TreeSet<Player> m_connectedPlayers = new TreeSet<>(new Comparator<Player>() {
-        public int compare(Player o1, Player o2) {
-            return o1.getRndOrder() - o2.getRndOrder();
-        }
-    });
+    private List<Player> m_connectedPlayers = new ArrayList<>();
 
-    private String m_lettersGuessed;
+    private String m_lettersGuessed = "";
 
-    private int m_wordGeneratorPlayerIndex = 0;
-    private Player m_lastPlay = null;
-    private String wordToGuess = null;
-    private String partlyGuessedWord = "";
-    private boolean m_anotherTurn = false;
-    private boolean myTurn = false;
-    private boolean m_isLetterGuessPhase = true;
+    private String m_wordToGuess = null;
+    private String m_partlyGuessedWord = "";
+
+    private boolean m_letterGuessed = false;
+    private boolean m_wordGuessed = false;
+    private boolean m_wordGenerated = false;
 
     private int[] generateScoreList()
     {
@@ -74,6 +70,158 @@ public class Game implements ISocketActions {
         return null;
     }
 
+    private void sendUpdateScorePakcet() {
+        GamePacket updateScore = new GamePacket();
+        updateScore.setPlayer(g_currentPlayer);
+        updateScore.setAction(GamePacket.Actions.UPDATE_SCORE);
+        updateScore.setPayload(new UpdateScorePayload(generateScoreList(), generateCurrentErrorsList()));
+        updateScore.sign(m_playerKeyPair.getPrivate());
+        try {
+            m_socket.sendGamePacket(updateScore);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendUpdateWordPacket() {
+        GamePacket updatedWord = new GamePacket();
+        updatedWord.setPlayer(g_currentPlayer);
+        updatedWord.setAction(GamePacket.Actions.UPDATE_WORD);
+        updatedWord.setPayload(new UpdateWordPayload(m_partlyGuessedWord, m_lettersGuessed));
+        updatedWord.sign(m_playerKeyPair.getPrivate());
+        try {
+            m_socket.sendGamePacket(updatedWord);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void connectPlayer(Player player) {
+        if(player.getRndOrder() == g_currentPlayer.getRndOrder() &&
+                !player.getNickname().equals(g_currentPlayer.getNickname()))
+        {
+            //Conflict - Update rnd order and send connect again
+            g_currentPlayer.setRndOrder(ThreadLocalRandom.current().nextInt(0, 100));
+        } else {
+            // Does not add if the player already exist!
+            Player connectedPlayer = findPlayer(player);
+            if(connectedPlayer != null) {
+                if(connectedPlayer.getRndOrder() != player.getRndOrder()) {
+                    // Update player list with new rndOrder
+                    m_connectedPlayers.remove(connectedPlayer);
+                } else {
+                    return;
+                }
+            }
+
+            m_connectedPlayers.add(player);
+            m_connectedPlayers.sort(new Comparator<Player>() {
+                public int compare(Player o1, Player o2) {
+                    return o1.getRndOrder() - o2.getRndOrder();
+                }
+            });
+            printConnectedPlayersList();
+        }
+    }
+
+    private void letterGuessed(Player player, char letter) {
+        Player guessingPlayer = m_connectedPlayers.get(m_guessingPlayerIndex);
+
+        if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) {
+            if (player.getNickname().equals(guessingPlayer.getNickname())) {
+                m_lettersGuessed += letter + " ";
+                if (m_wordToGuess.contains(String.valueOf(letter))) {
+                    //Acertô Mizeravi!
+                    System.out.println(player.getNickname() + " got '" + letter + "' right. ");
+                    for (int i = 0; i < m_wordToGuess.length(); i++) {
+                        if (m_wordToGuess.charAt(i) == letter) {
+                            m_partlyGuessedWord = m_partlyGuessedWord.substring(0, i) + letter + m_partlyGuessedWord.substring(i + 1, m_wordToGuess.length());
+                        }
+                    }
+                    System.out.println("m_wordToGuess = " + m_wordToGuess + " and partlyGuessed = " + m_partlyGuessedWord);
+                } else {
+                    findPlayer(player).incrementErrorsThisTurn();
+                    System.out.println(player.getNickname() + " got '" + letter + "' wrong.");
+                }
+
+                sendUpdateScorePakcet();
+
+                sendUpdateWordPacket();
+            }
+        }
+    }
+
+    private void wordGuessed(Player player, String word) {
+        Player guessingPlayer = m_connectedPlayers.get(m_guessingPlayerIndex);
+
+        if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) {
+            if (player.getNickname().equals(guessingPlayer.getNickname())) {
+
+                if (word.equals(m_wordToGuess)) {
+                    findPlayer(player).incrementScore();
+                    System.out.println("Player " + player.getNickname() + " won the game by getting the word " + m_wordToGuess + " correctly.");
+
+                    resetTurn();
+
+                    sendUpdateScorePakcet();
+
+                    sendNextGM();
+                } else {
+                    System.out.println("Too bad, wrong guess.");
+                    sendNextTurn();
+                }
+            }
+        }
+    }
+
+    private void sendNextGM() {
+        m_gameMasterIndex = (m_gameMasterIndex + 1) % m_connectedPlayers.size();
+        m_guessingPlayerIndex = (m_gameMasterIndex + 1) % m_connectedPlayers.size();
+
+        GamePacket nextGM = new GamePacket();
+        nextGM.setPlayer(g_currentPlayer);
+        nextGM.setAction(GamePacket.Actions.NEXT_GM);
+        nextGM.sign(m_playerKeyPair.getPrivate());
+
+        try {
+            m_socket.sendGamePacket(nextGM);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void resetTurn() {
+        m_lettersGuessed = "";
+        m_wordToGuess = "";
+        m_partlyGuessedWord = "";
+
+        m_letterGuessed = false;
+        m_wordGuessed = false;
+
+        m_wordGenerated = false;
+
+        for(Player p : m_connectedPlayers) {
+            p.setErrorsThisTurn(0);
+        }
+    }
+
+    private void sendNextTurn() {
+        do {
+            m_guessingPlayerIndex = (m_guessingPlayerIndex + 1) % m_connectedPlayers.size();
+        } while(m_guessingPlayerIndex == m_gameMasterIndex);
+
+        GamePacket nextTurn = new GamePacket();
+        nextTurn.setPlayer(g_currentPlayer);
+        nextTurn.setAction(GamePacket.Actions.NEXT_TURN);
+        nextTurn.sign(m_playerKeyPair.getPrivate());
+
+        try {
+            m_socket.sendGamePacket(nextTurn);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void gamePacketReceived(GamePacket packet) {
         Player player = packet.getPlayer();
@@ -81,140 +229,87 @@ public class Game implements ISocketActions {
         switch (packet.getAction())
         {
             case CONNECTED:
-                if(player.getRndOrder() == g_currentPlayer.getRndOrder())
-                {
-                    //Conflict - Update rnd order and send connect again
-                    g_currentPlayer.setRndOrder(ThreadLocalRandom.current().nextInt());
-                } else {
-                    // Does not add if the player already exist!
-                    if(!m_connectedPlayers.add(player)) {
-                        System.out.println("Player already connected: " + player.getNickname());
-                    }
-                }
+                connectPlayer(player);
                 break;
             //ACTIONS PARSED BY GAME MASTER
-            case LETTER_GUESS:
-                if(g_currentGameMaster == g_currentPlayer)
-                {
-                    m_isLetterGuessPhase = false;
-                    if (packet.getPlayer().getNickname().equals(higher(m_lastPlay).getNickname())) {
-                        m_lettersGuessed += packet.getCurrentWord().substring(0,1);
-                        if (wordToGuess.contains(packet.getCurrentWord().substring(0, 1))) {
-                            //Acertô Mizeravi!
-                            System.out.println(packet.getPlayer().getNickname() + " got " + packet.getCurrentWord() + " right. ");
-                            for (int i = 0; i < wordToGuess.length(); i++) {
-                                if (wordToGuess.charAt(i) == packet.getCurrentWord().charAt(0)) {
-                                    partlyGuessedWord = partlyGuessedWord.substring(0, i) + packet.getCurrentWord().charAt(0) + partlyGuessedWord.substring(i + 1, wordToGuess.length());
-                                }
-                            }
-                            System.out.println("wordToGuess = " + wordToGuess + " and partlyGuessed = " + partlyGuessedWord);
-                        } else {
-                            findPlayer(packet.getPlayer()).incrementErrorsThisTurn();
-                            System.out.println(packet.getPlayer().getNickname() + " got " + packet.getCurrentWord() + " wrong.");
-                        }
-
-                        GamePacket updatedWord = new GamePacket();
-                        updatedWord.setPlayer(g_currentPlayer);
-                        updatedWord.setAction(GamePacket.Actions.UPDATE_WORD);
-                        updatedWord.setCurrentWord(partlyGuessedWord);
-                        updatedWord.setEncryptedSign(RSAEncryptDecrypt.encrypt(partlyGuessedWord, playerKeyPair.getPrivate()));
-                        updatedWord.setCurrentScore(generateScoreList());
-                        updatedWord.setCurrentErrors(generateCurrentErrorsList());
-                        updatedWord.setCurrentGuessedLetters(m_lettersGuessed);
-
-                        try {
-                            socket.sendGamePacket(updatedWord);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }
+            case LETTER_GUESS: {
+                GuessPayload payload = (GuessPayload) packet.getPayload();
+                char letter = payload.getGuess().charAt(0);
+                letterGuessed(player, letter);
                 break;
-            case WORD_GUESS:
-                if(g_currentGameMaster == g_currentPlayer) {
-                    if (packet.getPlayer().getNickname().equals(higher(m_lastPlay).getNickname())) {
-                        m_isLetterGuessPhase = true;
-                        if (packet.getCurrentWord().equals(wordToGuess)) {
-                            findPlayer(packet.getPlayer()).incrementScore();
-                            System.out.println("Player " + packet.getPlayer().getNickname() + " won the game by getting the word " + wordToGuess + " correctly.");
-                            passTheGameToTheNextGameMaster();
-                        } else {
-                            System.out.println("Too bad, wrong guess.");
-                            m_anotherTurn = true;
-                        }
-                    }
-                }
+            }
+            case WORD_GUESS: {
+                GuessPayload payload = (GuessPayload) packet.getPayload();
+                String word = payload.getGuess();
+                wordGuessed(player, word);
                 break;
-
+            }
             //ACTIONS PARSED BY PLAYERS
-            case UPDATE_WORD:
-                if(!packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
-                {
-                    return;
-                }
-                System.out.println("The updated word is " + packet.getCurrentWord());
-                System.out.println("Scores: " + packet.getCurrentScores()[0] + " " + packet.getCurrentScores()[1] + " " + packet.getCurrentScores()[2]);
-                if(myTurn)
-                {
-                    System.out.print("Guess the word: ");
-                    try
-                    {
-                        String guessedWord = m_br.readLine();
-
-                        GamePacket guessedWordPacket = new GamePacket();
-                        guessedWordPacket.setPlayer(g_currentPlayer);
-                        guessedWordPacket.setAction(GamePacket.Actions.WORD_GUESS);
-                        guessedWordPacket.setCurrentWord(guessedWord);
-                        guessedWordPacket.setEncryptedSign(RSAEncryptDecrypt.encrypt(guessedWord, playerKeyPair.getPrivate()));
-                        socket.sendGamePacket(guessedWordPacket);
+            case UPDATE_SCORE: {
+                Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
+                if (player.getNickname().equals(gameMasterPlayer.getNickname())) {
+                    UpdateScorePayload payload = (UpdateScorePayload) packet.getPayload();
+                    int[] erros = payload.getCurrentErrors();
+                    int[] scores = payload.getCurrentScores();
+                    for (int i = 0; i < m_connectedPlayers.size(); i++) {
+                        m_connectedPlayers.get(i).setScore(scores[i]);
+                        m_connectedPlayers.get(i).setErrorsThisTurn(erros[i]);
                     }
-                    catch (Exception e)
-                    {
-                        e.printStackTrace();
-                    }
-
-                    myTurn = false;
+                } else {
+                    System.out.println("Received an invalid UPDATE_SCORE from player: " + player.getNickname());
                 }
                 break;
-            case NEXT_TURN:
-                if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname()))
-                {
-                    System.out.println("Game master notified me that " + packet.getCurrentWord() + " is the next to play.");
-                    if(packet.getCurrentWord().equals(g_currentPlayer.getNickname())) {
-                        //It's my turn
-                        myTurn = true;
-                        try {
-                            String guessedLetter;
-                            do {
-                                System.out.print("Please input a single letter guess: ");
-                                guessedLetter = m_br.readLine();
-                                guessedLetter.trim();
-                            }while(guessedLetter.length() != 1);
-                            GamePacket guessLetter = new GamePacket();
-                            guessLetter.setPlayer(g_currentPlayer);
-                            guessLetter.setAction(GamePacket.Actions.LETTER_GUESS);
-                            guessLetter.setCurrentWord(guessedLetter);
-                            guessLetter.setEncryptedSign(RSAEncryptDecrypt.encrypt(guessedLetter, playerKeyPair.getPrivate()));
-                            socket.sendGamePacket(guessLetter);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
+            }
+            case UPDATE_WORD: {
+                Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
+                if (player.getNickname().equals(gameMasterPlayer.getNickname())) {
+                    UpdateWordPayload payload = (UpdateWordPayload) packet.getPayload();
+
+                    System.out.println("The updated word is " + payload.getCurrentWord());
+                    System.out.println("The words guessed until now are: " + payload.getCurrentGuessedLetters());
+
+                    m_partlyGuessedWord = payload.getCurrentWord();
+                    m_lettersGuessed = payload.getCurrentGuessedLetters();
+
+                    printConnectedPlayersList();
+                } else {
+                    System.out.println("Received an invalid UPDATE_WORD from player: " + player.getNickname());
                 }
                 break;
+            }
+            case NEXT_TURN: {
+                Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
+                if(player.getNickname().equals(gameMasterPlayer.getNickname())) {
+
+                    do {
+                        m_guessingPlayerIndex = (m_guessingPlayerIndex + 1) % m_connectedPlayers.size();
+                    } while(m_guessingPlayerIndex == m_gameMasterIndex);
+
+                    m_letterGuessed = false;
+                    m_wordGuessed = false;
+
+                    printConnectedPlayersList();
+
+                    System.out.println(m_connectedPlayers.get(m_guessingPlayerIndex).getNickname() + "'s turn.");
+                } else {
+                    System.out.println("Received an invalid NEXT_TURN from player: " + player.getNickname());
+                }
+                break;
+            }
             case NEXT_GM:
-                if(packet.getPlayer().getNickname().equals(g_currentGameMaster.getNickname())) {
-                    if (packet.getCurrentWord().equals(g_currentPlayer.getNickname())) {
-                        g_currentGameMaster = g_currentPlayer;
-                        initializeTurnAsGM();
-                    } else {
-                        for (Player p : m_connectedPlayers) {
-                            if (p.getNickname().equals(packet.getCurrentWord())) {
-                                g_currentGameMaster = p;
-                                break;
-                            }
-                        }
-                    }
+                Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
+                if(player.getNickname().equals(gameMasterPlayer.getNickname())) {
+                    m_gameMasterIndex = (m_gameMasterIndex + 1) % m_connectedPlayers.size();
+                    m_guessingPlayerIndex = (m_gameMasterIndex + 1) % m_connectedPlayers.size();
+
+                    resetTurn();
+
+                    printConnectedPlayersList();
+
+                    System.out.println(m_connectedPlayers.get(m_gameMasterIndex).getNickname() + "'s turn as GM.");
+                    System.out.println(m_connectedPlayers.get(m_guessingPlayerIndex).getNickname() + "'s turn.");
+                } else {
+                    System.out.println("Received an invalid NEXT_GM from player: " + player.getNickname());
                 }
                 break;
         }
@@ -226,19 +321,19 @@ public class Game implements ISocketActions {
         String nickname = m_br.readLine();
 
         //Initializing keys
-        playerKeyPair = RSAEncryptDecrypt.createKeys();
+        m_playerKeyPair = RSAEncryptDecrypt.createKeys();
 
         //Generate random number that defines the order in the connected list.
-        int rnd = ThreadLocalRandom.current().nextInt();
+        int rnd = ThreadLocalRandom.current().nextInt(0, 100);
 
         g_currentPlayer = new Player(nickname, rnd);
-        g_currentPlayer.setPublicKey(playerKeyPair.getPublic());
+        g_currentPlayer.setPublicKey(m_playerKeyPair.getPublic());
 
         //NOTE: FOR THIS TO WORK IN MAC OS X PLEASE USE -Djava.net.preferIPv4Stack=true.
         //SOURCE: https://github.com/bluestreak01/questdb/issues/23
-        socket = new SocketListenner(PORT, InetAddress.getByName(GROUP_ADDR));
-        socket.setSocketActionsListenner(this);
-        new Thread(socket).start();
+        m_socket = new SocketListenner(PORT, InetAddress.getByName(GROUP_ADDR));
+        m_socket.setSocketActionsListenner(this);
+        new Thread(m_socket).start();
 
         GamePacket encriptedName = new GamePacket();
         //SEND A ENCRYPTED MESSAGE WITH ITS OWN NAME
@@ -249,64 +344,44 @@ public class Game implements ISocketActions {
                 Thread.sleep(500);
                 if(!m_gameReady)
                 {
-                    System.out.println("Connected players: " + m_connectedPlayers.size());
                     if(m_connectedPlayers.size() < 2) {
-                        encriptedName.setPlayer(g_currentPlayer);
-                        encriptedName.setAction(GamePacket.Actions.CONNECTED);
-                        encriptedName.setCurrentWord(g_currentPlayer.getNickname());
-                        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
-                        socket.sendGamePacket(encriptedName);
+                        sendConnect();
                     }else {
                         m_gameReady = true;
 
-                        m_connectedPlayers.add(g_currentPlayer);
+                        connectPlayer(g_currentPlayer);
 
                         // Send the last connect packet
-                        encriptedName.setPlayer(g_currentPlayer);
-                        encriptedName.setAction(GamePacket.Actions.CONNECTED);
-                        encriptedName.setCurrentWord(g_currentPlayer.getNickname());
-                        encriptedName.setEncryptedSign(RSAEncryptDecrypt.encrypt(g_currentPlayer.getNickname(), playerKeyPair.getPrivate()));
-                        socket.sendGamePacket(encriptedName);
+                        sendConnect();
 
-                        System.out.println("Player list:");
-                        printConnectedPlayersList();
+                        m_gameMasterIndex = 0;
+                        m_guessingPlayerIndex = 1;
                     }
                 }
                 else
                 {
-                    if(g_currentGameMaster == null)
-                    {
-                        g_currentGameMaster = m_connectedPlayers.first();
-                        System.out.println("Game Master Chosen: " + g_currentGameMaster.getNickname());
+                    if(m_connectedPlayers.get(m_guessingPlayerIndex) == g_currentPlayer &&
+                            !m_partlyGuessedWord.isEmpty()) { // My turn to guess
+                        if(!m_letterGuessed) {
+                            System.out.print("Guess the letter: ");
+                            char guessedLetter = m_br.readLine().charAt(0);
 
-                        if(g_currentGameMaster == g_currentPlayer) {
-                            initializeTurnAsGM();
+                            sendGuessedLetter(guessedLetter);
+                            m_letterGuessed = true;
+                        }else if(!m_wordGuessed) {
+                            System.out.print("Guess the word: ");
+                            String guessedWord = m_br.readLine();
+
+                            sendGuessedWord(guessedWord);
+                            m_wordGuessed = true;
                         }
                     }
-                    else
-                    {
-                        if(g_currentGameMaster == g_currentPlayer && m_anotherTurn)
-                        {
-                            m_anotherTurn = false;
-                            //Configure the last player that played correctly
-                            m_lastPlay = higher(m_lastPlay);
-                            if(higher(m_lastPlay) == g_currentGameMaster)
-                            {
-                                m_lastPlay = g_currentGameMaster;
-                            }
-                            //Choose the next player to play
-
-                            String nextToPlay = higher(m_lastPlay).getNickname();
-                            System.out.println("Letting " + nextToPlay + " know that he is the next to play.");
-                            //Send packet to notify player that he should play
-                            GamePacket notifyTurn = new GamePacket();
-                            notifyTurn.setPlayer(g_currentPlayer);
-                            notifyTurn.setAction(GamePacket.Actions.NEXT_TURN);
-                            notifyTurn.setCurrentWord(nextToPlay);
-                            notifyTurn.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToPlay, playerKeyPair.getPrivate()));
-                            socket.sendGamePacket(notifyTurn);
+                    if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) { // My turn to generate
+                        if(!m_wordGenerated) {
+                            generateWord();
+                            m_wordGenerated = true;
+                            sendUpdateWordPacket();
                         }
-
                     }
                 }
             } catch (Exception e) {
@@ -315,88 +390,87 @@ public class Game implements ISocketActions {
         }
     }
 
-    private void initializeTurnAsGM()
-    {
-        generate_word();
-        m_anotherTurn = false;
-        m_isLetterGuessPhase = true;
+    private void sendConnect() {
+        GamePacket packet = new GamePacket();
+        packet.setPlayer(g_currentPlayer);
+        packet.setAction(GamePacket.Actions.CONNECTED);
+        packet.sign(m_playerKeyPair.getPrivate());
 
-        //Configure the last player that played correctly
-        m_lastPlay = g_currentPlayer;
-        //Choose the next player to play
-        String nextToPlay = higher(m_lastPlay).getNickname();
-        System.out.println("Letting " + nextToPlay + " know that he is the next to play.");
-        //Send packet to notify player that he should play
-        GamePacket notifyTurn = new GamePacket();
-        notifyTurn.setPlayer(g_currentPlayer);
-        notifyTurn.setAction(GamePacket.Actions.NEXT_TURN);
-        notifyTurn.setCurrentWord(nextToPlay);
-        notifyTurn.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToPlay, playerKeyPair.getPrivate()));
-        try
-        {
-            socket.sendGamePacket(notifyTurn);
-        }
-        catch (Exception e)
-        {
+        try {
+            m_socket.sendGamePacket(packet);
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private Player higher(Player current)
-    {
-        Player next = m_connectedPlayers.higher(current);
-        if(next == null)
-            next = m_connectedPlayers.first();
+    private void sendGuessedWord(String guessedWord) {
+        GamePacket packet = new GamePacket();
+        packet.setPlayer(g_currentPlayer);
+        packet.setAction(GamePacket.Actions.WORD_GUESS);
+        packet.setPayload(new GuessPayload(String.valueOf(guessedWord)));
+        packet.sign(m_playerKeyPair.getPrivate());
 
-        return next;
+        try {
+            m_socket.sendGamePacket(packet);
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendGuessedLetter(char guessedLetter) {
+        GamePacket packet = new GamePacket();
+        packet.setPlayer(g_currentPlayer);
+        packet.setAction(GamePacket.Actions.LETTER_GUESS);
+        packet.setPayload(new GuessPayload(String.valueOf(guessedLetter)));
+        packet.sign(m_playerKeyPair.getPrivate());
+
+        try {
+            m_socket.sendGamePacket(packet);
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void printConnectedPlayersList() {
         int index = 0;
+        System.out.println("Player: " + g_currentPlayer.getNickname() + " ========================");
         for(Player p : m_connectedPlayers) {
-            if(index == m_wordGeneratorPlayerIndex) {
-                System.out.println(">" + p.getNickname() + " " + p.getRndOrder());
+            if(index == m_gameMasterIndex) {
+                System.out.format("*%-9s Order: %3d Score: %3d Errors: %3d\n",
+                        p.getNickname(),
+                        p.getRndOrder(),
+                        p.getScore(),
+                        p.getErrorsThisTurn());
+            } else if(index == m_guessingPlayerIndex){
+                System.out.format(">%-9s Order: %3d Score: %3d Errors: %3d\n",
+                        p.getNickname(),
+                        p.getRndOrder(),
+                        p.getScore(),
+                        p.getErrorsThisTurn());
             } else {
-                System.out.println(p.getNickname() + " " + p.getRndOrder());
+                System.out.format("%-10s Order: %3d Score: %3d Errors: %3d\n",
+                        p.getNickname(),
+                        p.getRndOrder(),
+                        p.getScore(),
+                        p.getErrorsThisTurn());
             }
             index++;
         }
     }
 
-    private void passTheGameToTheNextGameMaster()
+    private void generateWord()
     {
-        g_currentGameMaster = higher(g_currentGameMaster);
-
-        String nextToBeGameMaster = g_currentGameMaster.getNickname();
-        //Send packet to notify player that he should be the next game master
-        GamePacket notifyTurnGM = new GamePacket();
-        notifyTurnGM.setPlayer(g_currentPlayer);
-        notifyTurnGM.setAction(GamePacket.Actions.NEXT_GM);
-        notifyTurnGM.setCurrentWord(nextToBeGameMaster);
-        notifyTurnGM.setEncryptedSign(RSAEncryptDecrypt.encrypt(nextToBeGameMaster, playerKeyPair.getPrivate()));
-        try
-        {
-            socket.sendGamePacket(notifyTurnGM);
-        }
-        catch (Exception e)
-        {
-            e.printStackTrace();
-        }
-    }
-
-    private void generate_word()
-    {
-        partlyGuessedWord = "";
+        m_partlyGuessedWord = "";
         System.out.print("You're the new game master. Type the word for the new game: ");
         try {
-            wordToGuess = m_br.readLine();
+            m_wordToGuess = m_br.readLine();
         } catch (Exception e)
         {
             e.printStackTrace();
         }
-        for(int i = 0; i < wordToGuess.length(); i++)
+        for(int i = 0; i < m_wordToGuess.length(); i++)
         {
-            partlyGuessedWord = partlyGuessedWord + "_";
+            m_partlyGuessedWord = m_partlyGuessedWord + "_";
         }
     }
 

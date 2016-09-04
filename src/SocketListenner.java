@@ -27,7 +27,7 @@ public class SocketListenner implements Runnable{
 
     @Override
     public void run() {
-        byte[] buffer = new byte[1000];
+        byte[] buffer = new byte[2000];
 
         m_running = true;
         while(m_running) {
@@ -50,7 +50,7 @@ public class SocketListenner implements Runnable{
 
         byte[] objData = baos.toByteArray();
 
-        System.out.println("objData.length = " + objData.length);
+        System.out.println("objData.length = " + objData.length + " action: " + gamePacket.getAction());
 
         DatagramPacket packet = new DatagramPacket(objData, objData.length, m_group, m_port);
         m_socket.send(packet);
@@ -67,7 +67,7 @@ public class SocketListenner implements Runnable{
                     !player.getNickname().equals(Game.g_currentPlayer.getNickname())) {
                 String signature = RSAEncryptDecrypt.decrypt(gamePacket.getEncryptedSign(),
                         player.getPublicKey());
-                if(signature.equals(gamePacket.getCurrentWord())) {
+                if(signature.equals(player.getNickname())) {
                     m_socketActionsListenner.gamePacketReceived(gamePacket);
                 } else {
                     System.out.println("Invalid signature received from: " + player.getNickname() +

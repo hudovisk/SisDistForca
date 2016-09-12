@@ -83,6 +83,20 @@ public class Game implements ISocketActions {
         }
     }
 
+    private void sendQuitGamePacket()
+    {
+        GamePacket quitGame = new GamePacket();
+        quitGame.setPlayer(g_currentPlayer);
+        quitGame.setAction(GamePacket.Actions.QUIT_GAME);
+        quitGame.setPayload(new QuitGamePayload(true));
+        quitGame.sign(m_playerKeyPair.getPrivate());
+        try {
+            m_socket.sendGamePacket(quitGame);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private void sendUpdateWordPacket() {
         GamePacket updatedWord = new GamePacket();
         updatedWord.setPlayer(g_currentPlayer);
@@ -124,13 +138,27 @@ public class Game implements ISocketActions {
         }
     }
 
-    private void letterGuessed(Player player, char letter) {
+    private boolean letterGuessed(Player player, char letter) {
         Player guessingPlayer = m_connectedPlayers.get(m_guessingPlayerIndex);
 
         if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) {
             if (player.getNickname().equals(guessingPlayer.getNickname())) {
-                m_lettersGuessed += letter + " ";
-                if (m_wordToGuess.contains(String.valueOf(letter))) {
+                //Turn skipping
+                if(letter == '0')
+                {
+                    sendUpdateScorePakcet();
+                    sendUpdateWordPacket();
+                    return false;
+                }
+                boolean letterAlreadyGuessed = false;
+                if(m_lettersGuessed.contains(String.valueOf(letter)))
+                {
+                    System.out.println("You are trying a letter that has already been tried. You will get an error for that.");
+                    letterAlreadyGuessed = true;
+                }
+                if(!letterAlreadyGuessed)
+                    m_lettersGuessed += letter + " ";
+                if (!letterAlreadyGuessed && m_wordToGuess.contains(String.valueOf(letter))) {
                     //Acertô Mizeravi!
                     System.out.println(player.getNickname() + " got '" + letter + "' right. ");
                     for (int i = 0; i < m_wordToGuess.length(); i++) {
@@ -140,15 +168,25 @@ public class Game implements ISocketActions {
                     }
                     System.out.println("m_wordToGuess = " + m_wordToGuess + " and partlyGuessed = " + m_partlyGuessedWord);
                 } else {
-                    findPlayer(player).incrementErrorsThisTurn();
+                    Player playerThatGotWrong = findPlayer(player);
+                    playerThatGotWrong.incrementErrorsThisTurn();
                     System.out.println(player.getNickname() + " got '" + letter + "' wrong.");
+                    if(playerThatGotWrong.getErrorsThisTurn() >= MAX_ERRORS)
+                    {
+                        System.out.println("Exiting game because player " + playerThatGotWrong.getNickname() + " guessed too many wrong guesses.");
+                        sendQuitGamePacket();
+                        System.exit(0);
+                    }
+
                 }
 
                 sendUpdateScorePakcet();
 
                 sendUpdateWordPacket();
+
             }
         }
+        return true;
     }
 
     private void wordGuessed(Player player, String word) {
@@ -157,7 +195,12 @@ public class Game implements ISocketActions {
         if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) {
             if (player.getNickname().equals(guessingPlayer.getNickname())) {
 
-                if (word.equals(m_wordToGuess)) {
+                if(word.isEmpty())
+                {
+                    //Turn skip
+                    sendNextTurn();
+                }
+                else if (word.equals(m_wordToGuess)) {
                     findPlayer(player).incrementScore();
                     System.out.println("Player " + player.getNickname() + " won the game by getting the word " + m_wordToGuess + " correctly.");
 
@@ -220,6 +263,10 @@ public class Game implements ISocketActions {
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        //ENABLE WAIT FOR PACKET
+        waitingForGamePacket = true;
+        timeoutInitialTime = System.currentTimeMillis();
     }
 
     @Override
@@ -233,18 +280,41 @@ public class Game implements ISocketActions {
                 break;
             //ACTIONS PARSED BY GAME MASTER
             case LETTER_GUESS: {
+                //DISABLE WAIT FOR PACKET
+                waitingForGamePacket = false;
+                //ZERO CONSECUTIVE TIMEOUTS
+                m_connectedPlayers.get(m_guessingPlayerIndex).setTimeouts(0);
+
                 GuessPayload payload = (GuessPayload) packet.getPayload();
                 char letter = payload.getGuess().charAt(0);
-                letterGuessed(player, letter);
+
+                if(!letterGuessed(player, letter))
+                {
+                    sendNextTurn();
+                    break;
+                }
+                //ENABLE WAIT FOR PACKET
+                waitingForGamePacket = true;
+                timeoutInitialTime = System.currentTimeMillis();
                 break;
             }
             case WORD_GUESS: {
+                //DISABLE WAIT FOR PACKET
+                waitingForGamePacket = false;
+
                 GuessPayload payload = (GuessPayload) packet.getPayload();
                 String word = payload.getGuess();
+
                 wordGuessed(player, word);
                 break;
             }
             //ACTIONS PARSED BY PLAYERS
+            case QUIT_GAME: {
+                Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
+                if (player.getNickname().equals(gameMasterPlayer.getNickname())) {
+                    System.exit(-1);
+                }
+            }
             case UPDATE_SCORE: {
                 Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
                 if (player.getNickname().equals(gameMasterPlayer.getNickname())) {
@@ -266,7 +336,7 @@ public class Game implements ISocketActions {
                     UpdateWordPayload payload = (UpdateWordPayload) packet.getPayload();
 
                     System.out.println("The updated word is " + payload.getCurrentWord());
-                    System.out.println("The words guessed until now are: " + payload.getCurrentGuessedLetters());
+                    System.out.println("The letters guessed until now are: " + payload.getCurrentGuessedLetters());
 
                     m_partlyGuessedWord = payload.getCurrentWord();
                     m_lettersGuessed = payload.getCurrentGuessedLetters();
@@ -316,6 +386,28 @@ public class Game implements ISocketActions {
 
     }
 
+    public int MAX_TIMEOUTS = 3;
+    public int MAX_ERRORS = 5;
+
+    public long timeoutInitialTime = 0;
+    public final float TIMEOUT_TIME = 15;
+    public boolean waitingForGamePacket = false;
+    public void handleTimeout()
+    {
+
+        waitingForGamePacket = false;
+        Player disconnectedPlayer = m_connectedPlayers.get(m_guessingPlayerIndex);
+        disconnectedPlayer.incrementTimeouts();
+        System.out.println("Player " + disconnectedPlayer.getNickname() + " timeout.");
+        if(disconnectedPlayer.getTimeouts() >= MAX_TIMEOUTS)
+        {
+            System.out.println("Game ending due to multiple timeouts of player " + disconnectedPlayer.getNickname());
+            sendQuitGamePacket();
+            System.exit(-1);
+        }
+        sendNextTurn();
+    }
+
     public void run() throws IOException {
         System.out.print("Enter nickname: ");
         String nickname = m_br.readLine();
@@ -360,16 +452,37 @@ public class Game implements ISocketActions {
                 }
                 else
                 {
+
+                    //TIMEOUT HANDLING CODE
+                    if(waitingForGamePacket && m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer)
+                    {
+                        System.out.print(".");
+                        if(System.currentTimeMillis() - timeoutInitialTime > TIMEOUT_TIME*1000)
+                        {
+                            handleTimeout();
+                        }
+                    }
+
+
+
                     if(m_connectedPlayers.get(m_guessingPlayerIndex) == g_currentPlayer &&
                             !m_partlyGuessedWord.isEmpty()) { // My turn to guess
                         if(!m_letterGuessed) {
-                            System.out.print("Guess the letter: ");
-                            char guessedLetter = m_br.readLine().charAt(0);
-
+                            System.out.print("Guess the letter(empty to pass your turn): ");
+                            String input = m_br.readLine();
+                            char guessedLetter;
+                            if(input.isEmpty())
+                            {
+                                guessedLetter = '0';
+                            }
+                            else
+                            {
+                                guessedLetter = input.charAt(0);
+                            }
                             sendGuessedLetter(guessedLetter);
                             m_letterGuessed = true;
                         }else if(!m_wordGuessed) {
-                            System.out.print("Guess the word: ");
+                            System.out.print("Guess the word(empty to pass your turn): ");
                             String guessedWord = m_br.readLine();
 
                             sendGuessedWord(guessedWord);
@@ -381,6 +494,9 @@ public class Game implements ISocketActions {
                             generateWord();
                             m_wordGenerated = true;
                             sendUpdateWordPacket();
+                            //ENABLE WAIT FOR PACKET
+                            waitingForGamePacket = true;
+                            timeoutInitialTime = System.currentTimeMillis();
                         }
                     }
                 }

@@ -11,6 +11,21 @@ public class Player implements Serializable {
     private int score;
     private int errorsThisTurn;
 
+    public int getTimeouts() {
+        return timeouts;
+    }
+
+    public void setTimeouts(int timeouts) {
+        this.timeouts = timeouts;
+    }
+
+    public void incrementTimeouts()
+    {
+        this.timeouts++;
+    }
+
+    private int timeouts = 0;
+
     public int getScore()
     {
         return score;

@@ -10,6 +10,7 @@ public class GamePacket implements Serializable {
         CONNECTED,
         NEXT_TURN,
         NEXT_GM,
+        QUIT_GAME,
         LETTER_GUESS,
         UPDATE_WORD,
         UPDATE_SCORE, WORD_GUESS

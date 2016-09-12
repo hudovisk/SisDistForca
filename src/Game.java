@@ -479,14 +479,31 @@ public class Game implements ISocketActions {
                             {
                                 guessedLetter = input.charAt(0);
                             }
-                            sendGuessedLetter(guessedLetter);
-                            m_letterGuessed = true;
+
+                            //CHECK IF A TIMEOUT HAS NOT OCCURRED AND YOU LOST YOUR TURN
+                            if(m_connectedPlayers.get(m_guessingPlayerIndex) == g_currentPlayer)
+                            {
+                                sendGuessedLetter(guessedLetter);
+                                m_letterGuessed = true;
+                            }
+                            else
+                            {
+                                System.out.println("Guess was not sent. You(or the connection) took to long and your turn timed out.");
+                            }
                         }else if(!m_wordGuessed) {
                             System.out.print("Guess the word(empty to pass your turn): ");
                             String guessedWord = m_br.readLine();
 
-                            sendGuessedWord(guessedWord);
-                            m_wordGuessed = true;
+                            //CHECK IF A TIMEOUT HAS NOT OCCURRED AND YOU LOST YOUR TURN
+                            if(m_connectedPlayers.get(m_guessingPlayerIndex) == g_currentPlayer)
+                            {
+                                sendGuessedWord(guessedWord);
+                                m_wordGuessed = true;
+                            }
+                            else
+                            {
+                                System.out.println("Guess was not sent. You(or the connection) took to long and your turn timed out.");
+                            }
                         }
                     }
                     if(m_connectedPlayers.get(m_gameMasterIndex) == g_currentPlayer) { // My turn to generate

@@ -4,6 +4,7 @@ import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.security.KeyPair;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.Comparator;
@@ -19,7 +20,7 @@ public class Game implements ISocketActions {
     public static final int PORT = 6789;
     public static final int MAX_TIMEOUTS = 3;
     public static final int MAX_ERRORS = 5;
-    public static final int TIMEOUT_TIME = 15;
+    public static final int TIMEOUT_TIME = 60;
 
     //This refers to the player of the current process
     public static Player g_currentPlayer;
@@ -176,11 +177,16 @@ public class Game implements ISocketActions {
             }
 
             m_connectedPlayers.add(player);
-            m_connectedPlayers.sort(new Comparator<Player>() {
+            Collections.sort(m_connectedPlayers, new Comparator<Player>() {
                 public int compare(Player o1, Player o2) {
                     return o1.getRndOrder() - o2.getRndOrder();
                 }
             });
+//            m_connectedPlayers.sort(new Comparator<Player>() {
+//                public int compare(Player o1, Player o2) {
+//                    return o1.getRndOrder() - o2.getRndOrder();
+//                }
+//            });
             printConnectedPlayersList();
         }
     }
@@ -400,6 +406,7 @@ public class Game implements ISocketActions {
             case QUIT_GAME: {
                 Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
                 if (player.getNickname().equals(gameMasterPlayer.getNickname())) {
+                    System.out.println("Closing the game, player disconnected due excess of timeouts!!");
                     System.exit(-1);
                 }
             }

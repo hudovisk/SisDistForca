@@ -12,6 +12,9 @@ public class Game implements ISocketActions {
 
     public static final String GROUP_ADDR = "228.5.6.7";
     public static final int PORT = 6789;
+    public static final int MAX_TIMEOUTS = 3;
+    public static final int MAX_ERRORS = 5;
+
     public static Player g_currentPlayer;
 
     private int m_guessingPlayerIndex = 0;
@@ -35,6 +38,10 @@ public class Game implements ISocketActions {
     private boolean m_letterGuessed = false;
     private boolean m_wordGuessed = false;
     private boolean m_wordGenerated = false;
+
+    private long timeoutInitialTime = 0;
+    private final float TIMEOUT_TIME = 15;
+    private boolean waitingForGamePacket = false;
 
     private int[] generateScoreList()
     {
@@ -171,13 +178,6 @@ public class Game implements ISocketActions {
                     Player playerThatGotWrong = findPlayer(player);
                     playerThatGotWrong.incrementErrorsThisTurn();
                     System.out.println(player.getNickname() + " got '" + letter + "' wrong.");
-                    if(playerThatGotWrong.getErrorsThisTurn() >= MAX_ERRORS)
-                    {
-                        System.out.println("Exiting game because player " + playerThatGotWrong.getNickname() + " guessed too many wrong guesses.");
-                        sendQuitGamePacket();
-                        System.exit(0);
-                    }
-
                 }
 
                 sendUpdateScorePakcet();
@@ -249,9 +249,7 @@ public class Game implements ISocketActions {
     }
 
     private void sendNextTurn() {
-        do {
-            m_guessingPlayerIndex = (m_guessingPlayerIndex + 1) % m_connectedPlayers.size();
-        } while(m_guessingPlayerIndex == m_gameMasterIndex);
+        calcNextGuessingIndex();
 
         GamePacket nextTurn = new GamePacket();
         nextTurn.setPlayer(g_currentPlayer);
@@ -267,6 +265,15 @@ public class Game implements ISocketActions {
         //ENABLE WAIT FOR PACKET
         waitingForGamePacket = true;
         timeoutInitialTime = System.currentTimeMillis();
+    }
+
+    private void calcNextGuessingIndex() {
+        int tries = 0;
+        do {
+            m_guessingPlayerIndex = (m_guessingPlayerIndex + 1) % m_connectedPlayers.size();
+            if(tries++ > m_connectedPlayers.size()) return;
+        } while(m_guessingPlayerIndex == m_gameMasterIndex ||
+                m_connectedPlayers.get(m_guessingPlayerIndex).getErrorsThisTurn() > MAX_ERRORS);
     }
 
     @Override
@@ -351,9 +358,7 @@ public class Game implements ISocketActions {
                 Player gameMasterPlayer = m_connectedPlayers.get(m_gameMasterIndex);
                 if(player.getNickname().equals(gameMasterPlayer.getNickname())) {
 
-                    do {
-                        m_guessingPlayerIndex = (m_guessingPlayerIndex + 1) % m_connectedPlayers.size();
-                    } while(m_guessingPlayerIndex == m_gameMasterIndex);
+                    calcNextGuessingIndex();
 
                     m_letterGuessed = false;
                     m_wordGuessed = false;
@@ -386,13 +391,7 @@ public class Game implements ISocketActions {
 
     }
 
-    public int MAX_TIMEOUTS = 3;
-    public int MAX_ERRORS = 5;
-
-    public long timeoutInitialTime = 0;
-    public final float TIMEOUT_TIME = 15;
-    public boolean waitingForGamePacket = false;
-    public void handleTimeout()
+    private void handleTimeout()
     {
 
         waitingForGamePacket = false;

@@ -4,13 +4,20 @@ import java.security.PublicKey;
 /**
  * Created by Hudo on 21/08/2016.
  */
+
+/**
+ * The player class is pretty much a data class that contains all the player information.
+ */
 public class Player implements Serializable {
     private String nickname;
     private int rndOrder;
     private PublicKey publicKey;
     private int score;
     private int errorsThisTurn;
+    private int timeouts = 0;
 
+
+    /*GETTERS, SETTERS AND INCREMENTS*/
     public int getTimeouts() {
         return timeouts;
     }
@@ -23,8 +30,6 @@ public class Player implements Serializable {
     {
         this.timeouts++;
     }
-
-    private int timeouts = 0;
 
     public int getScore()
     {

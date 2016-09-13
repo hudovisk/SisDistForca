@@ -2,6 +2,8 @@
  * Created by Hudo on 04/09/2016.
  */
 public class UpdateScorePayload implements GamePayload {
+    //int[] arrays containing the current scores and errors of all the players. They are
+    //ordered respecting the rndOrder of the players.
     private int[] m_currentScores;
     private int[] m_currentErrors;
 
@@ -10,6 +12,7 @@ public class UpdateScorePayload implements GamePayload {
         m_currentErrors = currentErrors;
     }
 
+    /*GETTERS AND SETTERS*/
     public int[] getCurrentScores() {
         return m_currentScores;
     }

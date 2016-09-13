@@ -1,28 +1,20 @@
 /**
  * Created by rodrigoguimaraes on 2016-08-25.
  */
-import java.io.*;
 import java.security.*;
 import javax.crypto.Cipher;
 
 //BASED ON: http://www.devmedia.com.br/criptografia-assimetrica-criptografando-e-descriptografando-dados-em-java/31213
+
+/**
+ * Class that encrypts and decrypts information by generating and using symmetric keys and the RSA algorithm.
+ */
 public class RSAEncryptDecrypt {
-
-    /**
-     * Local da chave privada no sistema de arquivos.
-     */
-    public static String PrivateKeyPath;
-
-    /**
-     * Local da chave pública no sistema de arquivos.
-     */
-    public static String PublicKeyPath;
 
     public static final String ALGORITHM = "RSA";
 
     /**
-     * Gera a chave que contém um par de chave Privada e Pública usando 1025 bytes.
-     * Armazena o conjunto de chaves nos arquivos private.key e public.key
+     * Returns a KeyPair, which contains both the public and private key.
      */
     public static KeyPair createKeys() 
     {
@@ -42,14 +34,15 @@ public class RSAEncryptDecrypt {
     }
 
     /**
-     * Criptografa o texto puro usando chave.
+     * Uses a key to encrypt a text string. The key could be either
+     * public or private.
      */
     public static byte[] encrypt(String texto, Key chave) {
         byte[] cipherText = null;
 
         try {
             final Cipher cipher = Cipher.getInstance(ALGORITHM);
-            // Criptografa o texto puro usando a chave
+            //Encrypts the pure text using a cipher
             cipher.init(Cipher.ENCRYPT_MODE, chave);
             cipherText = cipher.doFinal(texto.getBytes());
         } catch (Exception e) {
@@ -60,14 +53,15 @@ public class RSAEncryptDecrypt {
     }
 
     /**
-     * Decriptografa o texto puro usando chave.
+     * Decrypts an encrypted byte array and returns the
+     * pure text string.
      */
     public static String decrypt(byte[] texto, Key chave) {
         byte[] dectyptedText = null;
 
         try {
             final Cipher cipher = Cipher.getInstance(ALGORITHM);
-            // Decriptografa o texto puro usando a chave
+            //Decrypts the pure text using the key
             cipher.init(Cipher.DECRYPT_MODE, chave);
             dectyptedText = cipher.doFinal(texto);
 
